@@ -1,0 +1,489 @@
+@page "/welcome"
+@using DogWalkerBlazor.Utilities
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpContextAccessor HttpContextAccessor
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@inject IHttpClientFactory HttpClientFactory
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    <h1 class="text-center mb-4">ברוכים הבאים!</h1>
+
+    @if (isLoaded && !string.IsNullOrEmpty(UserId))
+    {
+        @switch (UserRole)
+        {
+            case 0: // Dog Owner
+                <div class="row">
+                    <div class="col-12">
+                        <h3>נותני שירות זמינים</h3>
+                        <div class="filters-container mb-3">
+                            <div class="filter">
+                                <label>עיר:</label>
+                                <select class="form-select" @onchange="@(e => OnLocationChanged(e.Value?.ToString()))">
+                                    <option value="">כל הערים</option>
+                                    @foreach (var city in cities)
+                                    {
+                                        <option value="@city">@city</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="filter">
+                                <label>דירוג מינימלי:</label>
+                                <select class="form-select" @onchange="@(e => OnRatingChanged(e))">
+                                    <option value="">כל הדירוגים</option>
+                                    @foreach (var option in ratingOptions)
+                                    {
+                                        <option value="@option.Value">@option.Text</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="filter">
+                                <label>סוג שירות:</label>
+                                <select class="form-select" @onchange="@(e => OnServiceTypeChanged(e))">
+                                    <option value="">כל השירותים</option>
+                                    @foreach (var type in serviceTypes)
+                                    {
+                                        <option value="@type.Key">@type.Value</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                        <div class="availability-grid">
+                            @foreach (var availability in availabilities)
+                            {
+                                <div class="availability-card">
+                                    <div class="provider-info">
+                                        <div class="provider-image-container">
+                                            <img src="/images/default-profile.svg" alt="@availability.ProviderName" class="provider-image" />
+                                        </div>
+                                        <h4>@availability.ProviderName</h4>
+                                        <div class="provider-type">@GetProviderTypeHebrew(availability.ProviderType)</div>
+                                        <div class="rating">
+                                            @if (availability.AverageRating.HasValue && availability.AverageRating.Value > 0)
+                                            {
+                                                <span>
+                                                    @for (int i = 0; i < Math.Floor(availability.AverageRating.Value); i++)
+                                                    {
+                                                        <i class="bi bi-star-fill text-warning"></i>
+                                                    }
+                                                    @if (availability.AverageRating.Value % 1 >= 0.5)
+                                                    {
+                                                        <i class="bi bi-star-half text-warning"></i>
+                                                    }
+                                                    <span class="ms-1">(@availability.AverageRating.Value.ToString("F1"))</span>
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">אין דירוג</span>
+                                            }
+                                        </div>
+                                        <button class="btn btn-outline-primary btn-sm mt-2" @onclick="() => ViewProfile(availability.ProviderID)">
+                                            <i class="bi bi-person"></i> צפה בפרופיל
+                                        </button>
+                                    </div>
+                                    <div class="availability-details">
+                                        <div><i class="bi bi-calendar"></i> @availability.Date.ToString("dd/MM/yyyy")</div>
+                                        <div><i class="bi bi-clock"></i> @availability.StartTime.ToString(@"hh\:mm") - @availability.EndTime.ToString(@"hh\:mm")</div>
+                                        <div><i class="bi bi-telephone"></i> @availability.PhoneNumber</div>
+                                        <div><i class="bi bi-geo-alt"></i> @availability.Address</div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                break;
+
+            case 1: // Dog Walker
+            case 2: // Dog Groomer
+            case 3: // Dog Vet
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h3>הזמינות שלי</h3>
+                            <button class="btn btn-primary" @onclick="ShowAddAvailabilityModal">
+                                <i class="bi bi-plus-lg"></i> הוסף זמינות
+                            </button>
+                        </div>
+                        <div class="availability-grid">
+                            @foreach (var availability in availabilities)
+                            {
+                                <div class="availability-card">
+                                    <div class="availability-details">
+                                        <div><i class="bi bi-calendar"></i> @availability.Date.ToString("dd/MM/yyyy")</div>
+                                        <div><i class="bi bi-clock"></i> @availability.StartTime.ToString(@"hh\:mm") - @availability.EndTime.ToString(@"hh\:mm")</div>
+                                    </div>
+                                    <button class="btn btn-danger mt-2" @onclick="() => DeleteAvailability(availability.AvailabilityID)">
+                                        <i class="bi bi-trash"></i> מחק
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                @if (showAddModal)
+                {
+                    <div class="modal fade show" style="display: block;" tabindex="-1">
+                        <div class="modal-dialog">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">הוסף זמינות חדשה</h5>
+                                    <button type="button" class="btn-close" @onclick="CloseAddAvailabilityModal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <EditForm Model="@newAvailability" OnValidSubmit="AddAvailability">
+                                        <div class="mb-3">
+                                            <label class="form-label">תאריך:</label>
+                                            <InputDate @bind-Value="newAvailability.Date" class="form-control" />
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">שעת התחלה:</label>
+                                            <input type="time" value="@startTimeString" @onchange="@(e => OnStartTimeChange(e.Value?.ToString()))" class="form-control" />
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">שעת סיום:</label>
+                                            <input type="time" value="@endTimeString" @onchange="@(e => OnEndTimeChange(e.Value?.ToString()))" class="form-control" />
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">שמור</button>
+                                        <button type="button" class="btn btn-secondary" @onclick="CloseAddAvailabilityModal">ביטול</button>
+                                    </EditForm>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-backdrop fade show"></div>
+                }
+                break;
+
+            case 4: // Admin
+                <div class="row">
+                    <div class="col-12">
+                        <h3>ניהול זמינות</h3>
+                        <div class="availability-grid">
+                            @foreach (var availability in availabilities)
+                            {
+                                <div class="availability-card">
+                                    <div class="admin-info">
+                                        <div><strong>מזהה זמינות:</strong> @availability.AvailabilityID</div>
+                                        <div><strong>מזהה ספק:</strong> @availability.ProviderID</div>
+                                    </div>
+                                    <div class="provider-info">
+                                        <h4>@availability.ProviderName</h4>
+                                        <div class="provider-type">@GetProviderTypeHebrew(availability.ProviderType)</div>
+                                    </div>
+                                    <div class="availability-details">
+                                        <div><i class="bi bi-calendar"></i> @availability.Date.ToString("dd/MM/yyyy")</div>
+                                        <div><i class="bi bi-clock"></i> @availability.StartTime.ToString(@"hh\:mm") - @availability.EndTime.ToString(@"hh\:mm")</div>
+                                        <div><i class="bi bi-telephone"></i> @availability.PhoneNumber</div>
+                                        <div><i class="bi bi-geo-alt"></i> @availability.Address</div>
+                                    </div>
+                                    <button class="btn btn-danger mt-2" @onclick="() => DeleteAvailability(availability.AvailabilityID)">
+                                        <i class="bi bi-trash"></i> מחק
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                break;
+        }
+    }
+</div>
+
+@code {
+    private string? UserId { get; set; }
+    private int UserRole { get; set; }
+    private bool isLoaded = false;
+    private List<ServiceProviderAvailability> availabilities = new();
+    private bool showAddModal = false;
+    private NewAvailabilityRequest newAvailability = new();
+    private string startTimeString = "00:00";
+    private string endTimeString = "00:00";
+
+    // Filter properties
+    private string? selectedLocation;
+    private float? selectedRating;
+    private int? selectedServiceType;
+    private List<string> cities = new()
+    { 
+        "אילת",
+        "אריאל",
+        "אשדוד",
+        "אשקלון",
+        "באר שבע",
+        "בית שאן",
+        "בית שמש",
+        "בני ברק",
+        "בת ים",
+        "גבעתיים",
+        "דימונה",
+        "הוד השרון",
+        "הרצליה",
+        "חדרה",
+        "חולון",
+        "חיפה",
+        "טבריה",
+        "טירת כרמל",
+        "יבנה",
+        "יהוד-מונוסון",
+        "ירושלים",
+        "כפר סבא",
+        "כרמיאל",
+        "לוד",
+        "מודיעין",
+        "נהריה",
+        "נס ציונה",
+        "נתיבות",
+        "נתניה",
+        "עכו",
+        "עפולה",
+        "פתח תקווה",
+        "צפת",
+        "קריית אונו",
+        "קריית אתא",
+        "קריית ביאליק",
+        "קריית גת",
+        "קריית ים",
+        "קריית מוצקין",
+        "קריית מלאכי",
+        "קריית שמונה",
+        "ראש העין",
+        "ראשון לציון",
+        "רחובות",
+        "רמלה",
+        "רמת גן",
+        "רמת השרון",
+        "רעננה",
+        "שדרות",
+        "תל אביב-יפו"
+    };
+    private Dictionary<int, string> serviceTypes = new()
+    {
+        { 1, "מטפל כלבים" },
+        { 2, "מספרת כלבים" },
+        { 3, "וטרינר" }
+    };
+
+    private List<(float Value, string Text)> ratingOptions = new()
+    {
+        (0.0f, "ללא דירוג מינימלי"),
+        (1.0f, "⭐ ומעלה"),
+        (2.0f, "⭐⭐ ומעלה"),
+        (3.0f, "⭐⭐⭐ ומעלה"),
+        (4.0f, "⭐⭐⭐⭐ ומעלה"),
+        (5.0f, "⭐⭐⭐⭐⭐")
+    };
+
+    private async Task OnLocationChanged(string? location)
+    {
+        selectedLocation = location;
+        await LoadAvailabilities();
+    }
+
+    private async Task OnRatingChanged(ChangeEventArgs e)
+    {
+        if (float.TryParse(e.Value?.ToString(), out float rating))
+        {
+            selectedRating = rating;
+        }
+        else
+        {
+            selectedRating = null;
+        }
+        await LoadAvailabilities();
+    }
+
+    private async Task OnServiceTypeChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int serviceType))
+        {
+            selectedServiceType = serviceType;
+        }
+        else
+        {
+            selectedServiceType = null;
+        }
+        await LoadAvailabilities();
+    }
+
+    private void OnStartTimeChange(string? value)
+    {
+        startTimeString = value ?? "00:00";
+        if (TimeSpan.TryParse(startTimeString, out var time))
+        {
+            newAvailability.StartTime = time;
+        }
+    }
+
+    private void OnEndTimeChange(string? value)
+    {
+        endTimeString = value ?? "00:00";
+        if (TimeSpan.TryParse(endTimeString, out var time))
+        {
+            newAvailability.EndTime = time;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var result = await ProtectedSessionStorage.GetAsync<string>("userId");
+                UserId = result.Success ? result.Value : null;
+                
+                if (string.IsNullOrEmpty(UserId))
+                {
+                    NavigationManager.NavigateTo("/login", true);
+                    return;
+                }
+
+                var client = HttpClientFactory.CreateClient("API");
+                var response = await client.GetAsync($"api/user/role/{UserId}");
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    UserRole = await response.Content.ReadFromJsonAsync<int>();
+                    await LoadAvailabilities();
+                }
+                else
+                {
+                    await ProtectedSessionStorage.DeleteAsync("userId");
+                    NavigationManager.NavigateTo("/login", true);
+                    return;
+                }
+                
+                isLoaded = true;
+                StateHasChanged();
+            }
+            catch
+            {
+                NavigationManager.NavigateTo("/login", true);
+            }
+        }
+    }
+
+    private async Task LoadAvailabilities()
+    {
+        var client = HttpClientFactory.CreateClient("API");
+        var endpoint = UserRole switch
+        {
+            0 or 4 => BuildFilteredEndpoint(),
+            _ => $"api/availability/provider/{UserId}"
+        };
+
+        var response = await client.GetAsync(endpoint);
+        if (response.IsSuccessStatusCode)
+        {
+            availabilities = await response.Content.ReadFromJsonAsync<List<ServiceProviderAvailability>>() ?? new();
+        }
+    }
+
+    private string BuildFilteredEndpoint()
+    {
+        var queryParams = new List<string>();
+        
+        if (!string.IsNullOrEmpty(selectedLocation))
+        {
+            queryParams.Add($"location={Uri.EscapeDataString(selectedLocation)}");
+        }
+        
+        if (selectedRating.HasValue)
+        {
+            queryParams.Add($"minRating={selectedRating.Value}");
+        }
+        
+        if (selectedServiceType.HasValue)
+        {
+            queryParams.Add($"serviceType={selectedServiceType.Value}");
+        }
+
+        var baseEndpoint = "api/availability/all";
+        return queryParams.Count > 0 ? $"{baseEndpoint}?{string.Join("&", queryParams)}" : baseEndpoint;
+    }
+
+    private void ShowAddAvailabilityModal()
+    {
+        newAvailability = new NewAvailabilityRequest
+        {
+            ProviderID = int.Parse(UserId!),
+            Date = DateTime.Today,
+            StartTime = TimeSpan.Zero,
+            EndTime = TimeSpan.Zero
+        };
+        startTimeString = "00:00";
+        endTimeString = "00:00";
+        showAddModal = true;
+    }
+
+    private void CloseAddAvailabilityModal()
+    {
+        showAddModal = false;
+    }
+
+    private async Task AddAvailability()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync("api/availability", newAvailability);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadAvailabilities();
+                showAddModal = false;
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "שגיאה בהוספת הזמינות");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteAvailability(int availabilityId)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך למחוק זמינות זו?");
+        if (confirmed)
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.DeleteAsync($"api/availability/{availabilityId}");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadAvailabilities();
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "שגיאה במחיקת הזמינות");
+            }
+        }
+    }
+
+    private string GetProviderTypeHebrew(string type) => type.ToLower() switch
+    {
+        "walker" => "מטפל כלבים",
+        "groomer" => "מספרת כלבים",
+        "vet" => "וטרינר",
+        _ => type
+    };
+
+    private void ViewProfile(int providerId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{providerId}");
+    }
+
+    private void ViewProviderProfile(int providerId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{providerId}");
+    }
+} 

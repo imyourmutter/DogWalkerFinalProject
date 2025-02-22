@@ -1,0 +1,245 @@
+@page "/reviews"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    @if (userId == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">טוען...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-12">
+                <h2 class="mb-4">ביקורות</h2>
+                
+                @if (reviews.Any())
+                {
+                    <div class="row">
+                        @foreach (var review in reviews)
+                        {
+                            <div class="col-md-6 mb-4">
+                                <div class="card">
+                                    <div class="card-body">
+                                        @if (userRole == 0) // Dog Owner view
+                                        {
+                                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                                <div>
+                                                    <h5 class="card-title mb-1">@review.ReviewerFullName</h5>
+                                                    <small class="text-muted">@review.ReviewerUsername</small>
+                                                </div>
+                                                <button class="btn btn-outline-primary btn-sm" @onclick="() => ViewProfile(review.ReviewerId)">
+                                                    <i class="bi bi-person"></i> צפה בפרופיל
+                                                </button>
+                                            </div>
+                                        }
+                                        else if (userRole >= 1 && userRole <= 3) // Service Provider view
+                                        {
+                                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                                <div>
+                                                    <h5 class="card-title mb-1">@review.OwnerFullName</h5>
+                                                    <small class="text-muted">@review.OwnerUsername</small>
+                                                </div>
+                                                <button class="btn btn-outline-primary btn-sm" @onclick="() => ViewProfile(review.OwnerId)">
+                                                    <i class="bi bi-person"></i> צפה בפרופיל
+                                                </button>
+                                            </div>
+                                        }
+                                        else if (userRole == 4) // Admin view
+                                        {
+                                            <div class="admin-info mb-3">
+                                                <div><strong>מזהה ביקורת:</strong> @review.ReviewId</div>
+                                                <div><strong>מזהה פגישה:</strong> @review.AppointmentId</div>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                                <div>
+                                                    <h5 class="card-title mb-1">מאת: @review.ReviewerFullName</h5>
+                                                    <small class="text-muted">@review.ReviewerUsername</small>
+                                                </div>
+                                                <button class="btn btn-outline-primary btn-sm" @onclick="() => ViewProfile(review.ReviewerId)">
+                                                    <i class="bi bi-person"></i> צפה בפרופיל הכותב
+                                                </button>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                                <div>
+                                                    <h5 class="card-title mb-1">על: @review.ProviderFullName</h5>
+                                                    <small class="text-muted">@review.ProviderUsername</small>
+                                                </div>
+                                                <button class="btn btn-outline-primary btn-sm" @onclick="() => ViewProfile(review.ProviderId)">
+                                                    <i class="bi bi-person"></i> צפה בפרופיל נותן השירות
+                                                </button>
+                                            </div>
+                                        }
+
+                                        <div class="rating mb-2">
+                                            @for (int i = 1; i <= 5; i++)
+                                            {
+                                                <i class="bi @(i <= review.Rating ? "bi-star-fill" : "bi-star") text-warning"></i>
+                                            }
+                                        </div>
+
+                                        <p class="card-text">@review.ReviewText</p>
+                                        <div class="text-muted">
+                                            <small>@review.ReviewDate.ToString("dd/MM/yyyy HH:mm")</small>
+                                        </div>
+
+                                        @if (userRole == 4)
+                                        {
+                                            <div class="mt-3">
+                                                <button class="btn btn-danger btn-sm" @onclick="() => DeleteReview(review.ReviewId)">
+                                                    <i class="bi bi-trash"></i> מחק ביקורת
+                                                </button>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        אין ביקורות להצגה
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string? userId;
+    private int userRole;
+    private List<ReviewModel> reviews = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+                userId = userIdResult.Success ? userIdResult.Value : null;
+                
+                if (string.IsNullOrEmpty(userId))
+                {
+                    NavigationManager.NavigateTo("/login", true);
+                    return;
+                }
+
+                var client = HttpClientFactory.CreateClient("API");
+                var roleResponse = await client.GetAsync($"api/user/role/{userId}");
+                
+                if (roleResponse.IsSuccessStatusCode)
+                {
+                    userRole = await roleResponse.Content.ReadFromJsonAsync<int>();
+                    await LoadReviews();
+                }
+                else
+                {
+                    await ProtectedSessionStorage.DeleteAsync("userId");
+                    NavigationManager.NavigateTo("/login", true);
+                    return;
+                }
+
+                StateHasChanged();
+            }
+            catch
+            {
+                NavigationManager.NavigateTo("/login", true);
+            }
+        }
+    }
+
+    private async Task LoadReviews()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var endpoint = userRole switch
+            {
+                0 => $"api/review/owner/{userId}",
+                1 or 2 or 3 => $"api/review/provider/{userId}",
+                4 => "api/review/all",
+                _ => throw new InvalidOperationException("Invalid user role")
+            };
+
+            var response = await client.GetAsync(endpoint);
+            if (response.IsSuccessStatusCode)
+            {
+                reviews = await response.Content.ReadFromJsonAsync<List<ReviewModel>>() ?? new();
+                StateHasChanged();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                throw new Exception(error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הביקורות: {ex.Message}");
+            reviews = new List<ReviewModel>();
+        }
+    }
+
+    private async Task DeleteReview(int reviewId)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך למחוק ביקורת זו?");
+        if (confirmed)
+        {
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var response = await client.DeleteAsync($"api/review/{reviewId}");
+
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadReviews();
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    await JSRuntime.InvokeVoidAsync("alert", error);
+                }
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה במחיקת הביקורת: {ex.Message}");
+            }
+        }
+    }
+
+    private void ViewProfile(int profileUserId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{profileUserId}");
+    }
+
+    private class ReviewModel
+    {
+        public int ReviewId { get; set; }
+        public int AppointmentId { get; set; }
+        public int ReviewerId { get; set; }
+        public string ReviewerUsername { get; set; } = "";
+        public string ReviewerFullName { get; set; } = "";
+        public int ProviderId { get; set; }
+        public string ProviderUsername { get; set; } = "";
+        public string ProviderFullName { get; set; } = "";
+        public int OwnerId { get; set; }
+        public string OwnerUsername { get; set; } = "";
+        public string OwnerFullName { get; set; } = "";
+        public int Rating { get; set; }
+        public string ReviewText { get; set; } = "";
+        public DateTime ReviewDate { get; set; }
+    }
+} 

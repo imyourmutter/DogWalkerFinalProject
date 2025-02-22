@@ -1,0 +1,123 @@
+@page "/reviews-by-me"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    @if (userId == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">טוען...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <h2>ביקורות שכתבתי</h2>
+        
+        @if (reviews.Any())
+        {
+            <div class="row">
+                @foreach (var review in reviews)
+                {
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h5 class="card-title mb-0">
+                                        <button class="btn btn-link p-0" @onclick="() => ViewProfile(review.ReviewedUserId)">
+                                            @review.ReviewedUserName
+                                        </button>
+                                    </h5>
+                                    <div class="text-warning">
+                                        @for (int i = 1; i <= 5; i++)
+                                        {
+                                            <i class="bi @(i <= review.Rating ? "bi-star-fill" : "bi-star")"></i>
+                                        }
+                                    </div>
+                                </div>
+                                <p class="card-text">@review.ReviewText</p>
+                                <div class="text-muted small">
+                                    <i class="bi bi-calendar"></i> @review.ReviewDate.ToString("dd/MM/yyyy")
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info">
+                אין ביקורות להצגה
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string? userId;
+    private List<ReviewResponse> reviews = new();
+    private bool isLoaded = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isLoaded)
+        {
+            isLoaded = true;
+            var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+            if (userIdResult.Success && !string.IsNullOrEmpty(userIdResult.Value))
+            {
+                userId = userIdResult.Value;
+                await LoadReviews();
+            }
+            else
+            {
+                NavigationManager.NavigateTo("/login");
+            }
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadReviews()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.GetAsync($"api/review/by/{userId}");
+            
+            if (response.IsSuccessStatusCode)
+            {
+                reviews = await response.Content.ReadFromJsonAsync<List<ReviewResponse>>() ?? new();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הביקורות: {ex.Message}");
+        }
+    }
+
+    private void ViewProfile(int userId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{userId}");
+    }
+
+    private class ReviewResponse
+    {
+        public int ReviewId { get; set; }
+        public int ReviewedUserId { get; set; }
+        public string ReviewedUserName { get; set; } = "";
+        public int Rating { get; set; }
+        public string ReviewText { get; set; } = "";
+        public DateTime ReviewDate { get; set; }
+    }
+} 

@@ -1,0 +1,94 @@
+@page "/login"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@inject IHttpClientFactory HttpClientFactory
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header">
+                    <h3 class="text-center mb-0">התחברות</h3>
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(ErrorMessage))
+                    {
+                        <div class="alert alert-danger">@ErrorMessage</div>
+                    }
+
+                    <EditForm Model="@loginRequest" OnValidSubmit="@HandleLogin" FormName="LoginForm">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-3">
+                            <label for="username" class="form-label">שם משתמש:</label>
+                            <InputText id="username" @bind-Value="loginRequest.Username" class="form-control" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="password" class="form-label">סיסמה:</label>
+                            <InputText id="password" @bind-Value="loginRequest.Password" type="password" class="form-control" />
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">התחברות</button>
+                            <a href="/register" class="btn btn-outline-primary">הרשמה</a>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginRequest loginRequest = new LoginRequest();
+    private string? ErrorMessage;
+    private bool isLoaded = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var result = await ProtectedSessionStorage.GetAsync<string>("userId");
+                if (result.Success && !string.IsNullOrEmpty(result.Value))
+                {
+                    NavigationManager.NavigateTo("/", true);
+                    return;
+                }
+            }
+            catch { }
+            isLoaded = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleLogin()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync("api/user/login", loginRequest);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var userId = await response.Content.ReadAsStringAsync();
+                await ProtectedSessionStorage.SetAsync("userId", userId);
+                NavigationManager.NavigateTo("/", true);
+            }
+            else
+            {
+                ErrorMessage = "שם משתמש או סיסמה שגויים";
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"שגיאה בהתחברות: {ex.Message}";
+        }
+    }
+} 

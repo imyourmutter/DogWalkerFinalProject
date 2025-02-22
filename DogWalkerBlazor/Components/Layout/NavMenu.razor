@@ -1,0 +1,196 @@
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light" dir="rtl">
+    <div class="container-fluid px-2">
+        <span class="navbar-text me-2 small">
+            <i class="bi bi-person-badge"></i>
+            @if (isLoggedIn)
+            {
+                <span>שלום @username - @GetRoleText(userRole)</span>
+            }
+            else
+            {
+                <text>אורח/ת</text>
+            }
+        </span>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <NavLink class="nav-link" href="/">
+                        <i class="bi bi-house-fill"></i> דף הבית
+                    </NavLink>
+                </li>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="appointments">
+                        <span class="bi bi-calendar" aria-hidden="true"></span> פגישות
+                    </NavLink>
+                </div>
+
+                @if (userRole == 4)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="reviews">
+                            <span class="bi bi-star" aria-hidden="true"></span> ביקורות
+                        </NavLink>
+                    </div>
+                }
+                else
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="my-reviews">
+                            <span class="bi bi-star" aria-hidden="true"></span> ביקורות עליי
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="reviews-by-me">
+                            <span class="bi bi-pencil" aria-hidden="true"></span> ביקורות שכתבתי
+                        </NavLink>
+                    </div>
+                }
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="profile">
+                        <span class="bi bi-person" aria-hidden="true"></span> פרופיל
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="reports">
+                        <span class="bi bi-exclamation-triangle" aria-hidden="true"></span> @(userRole == 4 ? "מרכז דיווחים" : "הדיווחים שלי")
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="messages">
+                        <span class="bi bi-chat" aria-hidden="true"></span> הודעות
+                        @if (unreadCount > 0)
+                        {
+                            <span class="badge bg-danger rounded-pill">@unreadCount</span>
+                        }
+                    </NavLink>
+                </div>
+
+                @if (isLoggedIn)
+                {
+                    <div class="nav-item px-3">
+                        <button class="nav-link" @onclick="ConfirmLogout">
+                            <span class="bi bi-box-arrow-right" aria-hidden="true"></span> התנתק
+                        </button>
+                    </div>
+                }
+            </ul>
+        </div>
+    </div>
+</nav>
+
+@code {
+    private bool isLoggedIn;
+    private int unreadCount;
+    private int userRole;
+    private string? userId;
+    private string? username;
+    private System.Threading.Timer? refreshTimer;
+
+    private string GetRoleText(int role) => role switch
+    {
+        0 => "בעל/ת כלב",
+        1 => "מאלף/ת כלבים",
+        2 => "דוג ווקר/ית",
+        3 => "וטרינר/ית",
+        4 => "מנהל/ת מערכת",
+        5 => "באן!"
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+            if (userIdResult.Success && !string.IsNullOrEmpty(userIdResult.Value))
+            {
+                isLoggedIn = true;
+                userId = userIdResult.Value;
+
+                // Get user role and profile info
+                var client = HttpClientFactory.CreateClient("API");
+                var roleResponse = await client.GetAsync($"api/user/role/{userId}");
+                if (roleResponse.IsSuccessStatusCode)
+                {
+                    userRole = await roleResponse.Content.ReadFromJsonAsync<int>();
+                }
+
+                // Get user's username
+                var profileResponse = await client.GetFromJsonAsync<ProfileResponse>($"api/user/profile/{userId}");
+                if (profileResponse != null)
+                {
+                    username = profileResponse.Username;
+                }
+
+                await CheckUnreadMessages();
+
+                // Set up refresh timer for unread messages
+                refreshTimer = new System.Threading.Timer(
+                    async _ => await InvokeAsync(CheckUnreadMessages),
+                    null,
+                    TimeSpan.FromSeconds(5),
+                    TimeSpan.FromSeconds(5)
+                );
+            }
+            StateHasChanged();
+        }
+    }
+
+    private async Task CheckUnreadMessages()
+    {
+        if (!isLoggedIn || string.IsNullOrEmpty(userId)) return;
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.GetFromJsonAsync<int>($"api/message/unread/{userId}");
+            if (unreadCount != response)
+            {
+                unreadCount = response;
+                StateHasChanged();
+            }
+        }
+        catch { }
+    }
+
+    private async Task ConfirmLogout()
+    {
+        try
+        {
+            var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך להתנתק?");
+            if (confirmed)
+            {
+                await ProtectedSessionStorage.DeleteAsync("userId");
+                NavigationManager.NavigateTo("/login", true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Logout error: {ex.Message}");
+            // Still try to redirect to login if there's an error
+            NavigationManager.NavigateTo("/login", true);
+        }
+    }
+
+    private class ProfileResponse
+    {
+        public string Username { get; set; } = "";
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
+    }
+} 

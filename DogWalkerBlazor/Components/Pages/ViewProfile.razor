@@ -1,0 +1,342 @@
+@page "/view-profile/{userId}"
+@using DogWalkerBlazor.Utilities
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    @if (profile == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">טוען...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-center mb-0">פרופיל משתמש</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="text-center mb-4">
+                            <img src="/images/default-profile.svg" alt="@profile.Username" class="rounded-circle mb-3" style="width: 150px; height: 150px;" />
+                            <h3 class="mb-1">@profile.Username</h3>
+                            <h5 class="text-muted mb-2">@profile.FullName</h5>
+                            <div class="text-muted mb-2">@GlobalConstants.GetUserRoleText(profile.UserRole)</div>
+                            @if (loggedInUserId != null && loggedInUserId != UserId)
+                            {
+                                <button class="btn btn-primary" @onclick="SendMessage">
+                                    <i class="bi bi-chat-dots"></i> שלח הודעה
+                                </button>
+                            }
+                        </div>
+
+                        @if (profile.AverageRating.HasValue)
+                        {
+                            <div class="mb-3 text-center">
+                                <div class="rating-display">
+                                    @for (int i = 1; i <= 5; i++)
+                                    {
+                                        <i class="bi @(i <= Math.Round(profile.AverageRating.Value) ? "bi-star-fill" : "bi-star")" style="color: gold;"></i>
+                                    }
+                                    <span class="ms-2">(@profile.AverageRating.Value.ToString("F1"))</span>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="row mt-4">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="fw-bold">דוא"ל:</label>
+                                    <div>@profile.Email</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="fw-bold">טלפון:</label>
+                                    <div>@profile.PhoneNumber</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="fw-bold">כתובת:</label>
+                            <div>@profile.Address</div>
+                        </div>
+
+                        @if (profile.UserRole == 0 && profile.Pets.Any()) // Dog Owner
+                        {
+                            <div class="mt-4">
+                                <h5 class="mb-3">כלבים:</h5>
+                                <div class="row">
+                                    @foreach (var pet in profile.Pets)
+                                    {
+                                        <div class="col-md-6 mb-3">
+                                            <div class="card">
+                                                <div class="card-body">
+                                                    <h6 class="card-title">@pet.PetName</h6>
+                                                    <div><strong>מזהה כלב:</strong> @pet.PetId</div>
+                                                    <div><strong>גזע:</strong> @pet.Breed</div>
+                                                    <div><strong>משקל:</strong> @pet.Weight ק"ג</div>
+                                                    @if (!string.IsNullOrEmpty(pet.Allergies))
+                                                    {
+                                                        <div><strong>אלרגיות:</strong> @pet.Allergies</div>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(pet.SpecialNeeds))
+                                                    {
+                                                        <div><strong>צרכים מיוחדים:</strong> @pet.SpecialNeeds</div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="text-center mt-4">
+                            @if (loggedInUserRole == 4 && profile.UserRole != 4) // Admin viewing non-admin user
+                            {
+                                <button class="btn btn-danger me-2" @onclick="BanUser">
+                                    <i class="bi bi-slash-circle"></i> חסום משתמש
+                                </button>
+                                <button class="btn btn-danger me-2" @onclick="DeleteUser">
+                                    <i class="bi bi-trash"></i> מחק משתמש
+                                </button>
+                            }
+                            <button class="btn btn-secondary" @onclick="GoBack">חזרה</button>
+                        </div>
+
+                        @if (isLoggedIn && loggedInUserId != UserId)
+                        {
+                            <div class="mt-3">
+                                <button class="btn btn-outline-danger" @onclick="ShowReportModal">
+                                    <i class="bi bi-exclamation-triangle"></i> דווח על משתמש
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (showReportModal)
+{
+    <div class="modal fade show" style="display: block;" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">דווח על משתמש</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReportModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">תיאור הדיווח:</label>
+                        <textarea class="form-control" @bind="reportDescription" rows="4" maxlength="2000"></textarea>
+                        <div class="form-text">@(2000 - (reportDescription?.Length ?? 0)) תווים נותרו</div>
+                    </div>
+
+                    <button type="button" class="btn btn-primary" @onclick="SubmitReport">שלח דיווח</button>
+                    <button type="button" class="btn btn-secondary" @onclick="CloseReportModal">ביטול</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    [Parameter]
+    public string UserId { get; set; } = "";
+
+    private ProfileResponse? profile;
+    private string? loggedInUserId;
+    private int loggedInUserRole;
+    private bool isLoaded = false;
+    private bool showReportModal = false;
+    private string? reportDescription;
+    private bool isLoggedIn => loggedInUserId != null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isLoaded)
+        {
+            isLoaded = true;
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+                if (userIdResult.Success)
+                {
+                    loggedInUserId = userIdResult.Value;
+                    var roleResponse = await client.GetAsync($"api/user/role/{loggedInUserId}");
+                    if (roleResponse.IsSuccessStatusCode)
+                    {
+                        loggedInUserRole = await roleResponse.Content.ReadFromJsonAsync<int>();
+                        StateHasChanged();
+                    }
+                }
+
+                profile = await client.GetFromJsonAsync<ProfileResponse>($"api/user/profile/{UserId}");
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הפרופיל: {ex.Message}");
+                NavigationManager.NavigateTo("/");
+            }
+        }
+    }
+
+    protected override Task OnInitializedAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    private void GoBack()
+    {
+        NavigationManager.NavigateTo("/welcome");
+    }
+
+    private void SendMessage()
+    {
+        NavigationManager.NavigateTo($"/messages/{UserId}");
+    }
+
+    private async Task BanUser()
+    {
+        if (profile == null) return;
+
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך לחסום משתמש זה? פעולה זו תמנע מהמשתמש להתחבר למערכת.");
+        if (confirmed)
+        {
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var response = await client.PostAsync($"api/user/ban/{UserId}", null);
+                if (response.IsSuccessStatusCode)
+                {
+                    await JSRuntime.InvokeVoidAsync("alert", "המשתמש נחסם בהצלחה");
+                    NavigationManager.NavigateTo("/welcome");
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    await JSRuntime.InvokeVoidAsync("alert", error);
+                }
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בחסימת המשתמש: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task DeleteUser()
+    {
+        if (profile == null) return;
+
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך למחוק משתמש זה? פעולה זו תמחק את כל המידע הקשור למשתמש ואינה ניתנת לביטול.");
+        if (confirmed)
+        {
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var response = await client.DeleteAsync($"api/user/{UserId}");
+                if (response.IsSuccessStatusCode)
+                {
+                    await JSRuntime.InvokeVoidAsync("alert", "המשתמש נמחק בהצלחה");
+                    NavigationManager.NavigateTo("/welcome");
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    await JSRuntime.InvokeVoidAsync("alert", error);
+                }
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה במחיקת המשתמש: {ex.Message}");
+            }
+        }
+    }
+
+    private void ShowReportModal()
+    {
+        reportDescription = "";
+        showReportModal = true;
+    }
+
+    private void CloseReportModal()
+    {
+        showReportModal = false;
+        reportDescription = null;
+    }
+
+    private async Task SubmitReport()
+    {
+        if (string.IsNullOrWhiteSpace(reportDescription))
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "אנא הכנס תיאור לדיווח");
+            return;
+        }
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var request = new
+            {
+                ReporterId = int.Parse(loggedInUserId!),
+                ReportedId = int.Parse(UserId),
+                Description = reportDescription
+            };
+
+            var response = await client.PostAsJsonAsync("api/report", request);
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "הדיווח נשלח בהצלחה");
+                CloseReportModal();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בשליחת הדיווח: {ex.Message}");
+        }
+    }
+
+    private class ProfileResponse
+    {
+        public string Username { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string? PhoneNumber { get; set; }
+        public string Address { get; set; } = "";
+        public int UserRole { get; set; }
+        public float? AverageRating { get; set; }
+        public List<PetModel>? Pets { get; set; }
+    }
+
+    private class PetModel
+    {
+        public int PetId { get; set; }
+        public string PetName { get; set; } = "";
+        public string Breed { get; set; } = "";
+        public double Weight { get; set; }
+        public string? Allergies { get; set; }
+        public string? SpecialNeeds { get; set; }
+    }
+} 

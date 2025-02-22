@@ -1,0 +1,83 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    <div class="row justify-content-center">
+        <div class="col-md-8 text-center">
+            <h1 class="display-4 mb-4">ברוכים הבאים לDogWalker</h1>
+            <p class="lead mb-4">
+                הפלטפורמה המובילה לשירותי כלבים בישראל
+            </p>
+            
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title mb-3">התחברות או הרשמה</h5>
+                    <p class="card-text">
+                        כדי להתחיל להשתמש בשירותים שלנו, אנא התחברו או הירשמו
+                    </p>
+                    <div class="d-grid gap-2 col-md-6 mx-auto">
+                        <a href="/login" class="btn btn-primary btn-lg mb-2">
+                            <i class="bi bi-box-arrow-in-right"></i>
+                            התחברות
+                        </a>
+                        <a href="/register" class="btn btn-outline-primary btn-lg">
+                            <i class="bi bi-person-plus"></i>
+                            הרשמה
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-5">
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-person-walking display-4 text-primary mb-3"></i>
+                            <h5 class="card-title">הליכה עם כלבים</h5>
+                            <p class="card-text">מצאו דוגווקר מקצועי שיטייל עם הכלב שלכם</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-scissors display-4 text-primary mb-3"></i>
+                            <h5 class="card-title">מספרות כלבים</h5>
+                            <p class="card-text">טיפוח מקצועי לכלב שלכם</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <i class="bi bi-heart-pulse display-4 text-primary mb-3"></i>
+                            <h5 class="card-title">וטרינרים</h5>
+                            <p class="card-text">טיפול רפואי מקצועי לכלב שלכם</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+            if (userIdResult.Success && !string.IsNullOrEmpty(userIdResult.Value))
+            {
+                NavigationManager.NavigateTo("/welcome");
+            }
+        }
+        catch
+        {
+            // If there's an error reading from storage, stay on the home page
+        }
+    }
+}

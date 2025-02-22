@@ -1,0 +1,378 @@
+@page "/profile"
+@using DogWalkerBlazor.Utilities
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    @if (profile == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">טוען...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-center mb-0">הפרופיל שלי</h3>
+                    </div>
+                    <div class="card-body">
+                        <EditForm Model="@profile" OnValidSubmit="HandleProfileUpdate">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+
+                            @if (profile.UserRole == 4) // Admin
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label">מזהה משתמש:</label>
+                                    <input type="text" class="form-control" value="@userId" disabled />
+                                </div>
+                            }
+
+                            <div class="mb-3">
+                                <label class="form-label">שם משתמש:</label>
+                                <InputText @bind-Value="profile.Username" class="form-control" />
+                                <ValidationMessage For="@(() => profile.Username)" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">סיסמה:</label>
+                                <InputText type="password" @bind-Value="profile.Password" class="form-control" />
+                                <ValidationMessage For="@(() => profile.Password)" />
+                                <small class="text-muted">
+                                    הסיסמה חייבת להכיל לפחות 8 תווים, אות גדולה, אות קטנה, מספר ותו מיוחד
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">שם מלא:</label>
+                                <InputText @bind-Value="profile.FullName" class="form-control" />
+                                <ValidationMessage For="@(() => profile.FullName)" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">דוא"ל:</label>
+                                <InputText @bind-Value="profile.Email" class="form-control" />
+                                <ValidationMessage For="@(() => profile.Email)" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">טלפון:</label>
+                                <InputText @bind-Value="profile.PhoneNumber" class="form-control" />
+                                <ValidationMessage For="@(() => profile.PhoneNumber)" />
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">תפקיד</label>
+                                <input type="text" class="form-control" value="@GlobalConstants.GetUserRoleText(profile.UserRole)" disabled />
+                            </div>
+
+                            @if (averageRating.HasValue)
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label">דירוג ממוצע:</label>
+                                    <div class="rating-display">
+                                        @for (int i = 1; i <= 5; i++)
+                                        {
+                                            <i class="bi @(i <= Math.Round(averageRating.Value) ? "bi-star-fill" : "bi-star")" style="color: gold;"></i>
+                                        }
+                                        <span class="ms-2">(@averageRating.Value.ToString("F1"))</span>
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="mb-3">
+                                <label class="form-label">עיר:</label>
+                                <InputSelect @bind-Value="selectedCity" @bind-Value:after="OnCityOrStreetChanged" class="form-select">
+                                    <option value="">בחר עיר</option>
+                                    @foreach (var city in cities)
+                                    {
+                                        <option value="@city">@city</option>
+                                    }
+                                </InputSelect>
+                                @if (string.IsNullOrEmpty(selectedCity) && showValidationErrors)
+                                {
+                                    <div class="text-danger">יש לבחור עיר</div>
+                                }
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">רחוב ומספר בית:</label>
+                                <InputText @bind-Value="streetAddress" @bind-Value:after="OnCityOrStreetChanged" class="form-control" />
+                                @if (string.IsNullOrEmpty(streetAddress) && showValidationErrors)
+                                {
+                                    <div class="text-danger">יש להזין רחוב ומספר בית</div>
+                                }
+                            </div>
+
+                            @if (profile.UserRole == 0) // Dog Owner
+                            {
+                                <div class="card mt-4 mb-3">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h5 class="mb-0">פרטי כלבים</h5>
+                                        @if (profile.Pets.Count < 10)
+                                        {
+                                            <button type="button" class="btn btn-primary btn-sm" @onclick="AddPet">
+                                                <i class="bi bi-plus-lg"></i> הוסף כלב
+                                            </button>
+                                        }
+                                    </div>
+                                    <div class="card-body">
+                                        @foreach (var pet in profile.Pets)
+                                        {
+                                            <div class="pet-form mb-4 p-3 border rounded">
+                                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                                    <h6 class="mb-0">פרטי כלב</h6>
+                                                    <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemovePet(pet)">
+                                                        <i class="bi bi-trash"></i> הסר
+                                                    </button>
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">שם הכלב:</label>
+                                                    <InputText @bind-Value="pet.PetName" class="form-control" />
+                                                    <ValidationMessage For="@(() => pet.PetName)" />
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">גזע:</label>
+                                                    <InputText @bind-Value="pet.Breed" class="form-control" />
+                                                    <ValidationMessage For="@(() => pet.Breed)" />
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">משקל (ק"ג):</label>
+                                                    <InputNumber @bind-Value="pet.Weight" class="form-control" />
+                                                    <ValidationMessage For="@(() => pet.Weight)" />
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">אלרגיות:</label>
+                                                    <InputText @bind-Value="pet.Allergies" class="form-control" />
+                                                    <ValidationMessage For="@(() => pet.Allergies)" />
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">צרכים מיוחדים:</label>
+                                                    <InputText @bind-Value="pet.SpecialNeeds" class="form-control" />
+                                                    <ValidationMessage For="@(() => pet.SpecialNeeds)" />
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="text-center">
+                                <button type="submit" class="btn btn-primary">שמור שינויים</button>
+                            </div>
+                        </EditForm>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private RegistrationModel? profile;
+    private string selectedCity = "";
+    private string streetAddress = "";
+    private bool showValidationErrors = false;
+    private float? averageRating;
+    private string? userId;
+    private List<string> cities = new()
+    {
+        "אילת",
+        "אריאל",
+        "אשדוד",
+        "אשקלון",
+        "באר שבע",
+        "בית שאן",
+        "בית שמש",
+        "בני ברק",
+        "בת ים",
+        "גבעתיים",
+        "דימונה",
+        "הוד השרון",
+        "הרצליה",
+        "חדרה",
+        "חולון",
+        "חיפה",
+        "טבריה",
+        "טירת כרמל",
+        "יבנה",
+        "יהוד-מונוסון",
+        "ירושלים",
+        "כפר סבא",
+        "כרמיאל",
+        "לוד",
+        "מודיעין",
+        "נהריה",
+        "נס ציונה",
+        "נתיבות",
+        "נתניה",
+        "עכו",
+        "עפולה",
+        "פתח תקווה",
+        "צפת",
+        "קריית אונו",
+        "קריית אתא",
+        "קריית ביאליק",
+        "קריית גת",
+        "קריית ים",
+        "קריית מוצקין",
+        "קריית מלאכי",
+        "קריית שמונה",
+        "ראש העין",
+        "ראשון לציון",
+        "רחובות",
+        "רמלה",
+        "רמת גן",
+        "רמת השרון",
+        "רעננה",
+        "שדרות",
+        "תל אביב-יפו"
+    };
+
+    private bool isLoaded = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isLoaded)
+        {
+            isLoaded = true;
+            var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+            if (userIdResult.Success && !string.IsNullOrEmpty(userIdResult.Value))
+            {
+                userId = userIdResult.Value;
+                try
+                {
+                    var client = HttpClientFactory.CreateClient("API");
+                    var response = await client.GetFromJsonAsync<ProfileResponse>($"api/user/profile/{userId}");
+                    if (response != null)
+                    {
+                        profile = new RegistrationModel
+                        {
+                            Username = response.Username,
+                            Password = response.Password,
+                            FullName = response.FullName,
+                            Email = response.Email,
+                            PhoneNumber = response.PhoneNumber,
+                            Address = response.Address,
+                            UserRole = response.UserRole,
+                            Pets = response.Pets ?? new List<PetModel>()
+                        };
+                        averageRating = response.AverageRating;
+
+                        // Split address into city and street
+                        var addressParts = profile.Address.Split(',', 2);
+                        if (addressParts.Length == 2)
+                        {
+                            streetAddress = addressParts[0].Trim();
+                            selectedCity = addressParts[1].Trim();
+                        }
+                        StateHasChanged();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הפרופיל: {ex.Message}");
+                    NavigationManager.NavigateTo("/");
+                }
+            }
+            else
+            {
+                NavigationManager.NavigateTo("/login");
+            }
+        }
+    }
+
+    protected override Task OnInitializedAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    private void AddPet()
+    {
+        if (profile != null && profile.Pets.Count < 10)
+        {
+            profile.Pets.Add(new PetModel());
+        }
+    }
+
+    private void RemovePet(PetModel pet)
+    {
+        if (profile != null)
+        {
+            profile.Pets.Remove(pet);
+        }
+    }
+
+    private void OnCityOrStreetChanged()
+    {
+        if (profile != null && !string.IsNullOrEmpty(selectedCity) && !string.IsNullOrEmpty(streetAddress))
+        {
+            profile.Address = $"{streetAddress}, {selectedCity}";
+        }
+    }
+
+    private async Task HandleProfileUpdate()
+    {
+        if (profile == null) return;
+
+        // Set the address before validation
+        if (!string.IsNullOrEmpty(selectedCity) && !string.IsNullOrEmpty(streetAddress))
+        {
+            profile.Address = $"{streetAddress}, {selectedCity}";
+        }
+
+        showValidationErrors = true;
+
+        if (string.IsNullOrEmpty(selectedCity) || string.IsNullOrEmpty(streetAddress))
+        {
+            return;
+        }
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync($"api/user/profile/update/{userId}", profile);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "הפרופיל עודכן בהצלחה");
+            }
+            else
+            {
+                var errorMessage = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", errorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בעדכון הפרופיל: {ex.Message}");
+        }
+    }
+
+    private class ProfileResponse
+    {
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string? PhoneNumber { get; set; }
+        public string Address { get; set; } = "";
+        public int UserRole { get; set; }
+        public float? AverageRating { get; set; }
+        public List<PetModel>? Pets { get; set; }
+    }
+} 

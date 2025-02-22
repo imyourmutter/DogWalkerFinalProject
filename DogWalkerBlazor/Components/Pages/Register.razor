@@ -1,0 +1,284 @@
+@page "/register"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-center mb-0">הרשמה</h3>
+                </div>
+                <div class="card-body">
+                    <EditForm Model="@registrationModel" OnValidSubmit="HandleRegistration">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-3">
+                            <label class="form-label">שם משתמש:</label>
+                            <InputText @bind-Value="registrationModel.Username" class="form-control" />
+                            <ValidationMessage For="@(() => registrationModel.Username)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">סיסמה:</label>
+                            <InputText type="password" @bind-Value="registrationModel.Password" class="form-control" />
+                            <ValidationMessage For="@(() => registrationModel.Password)" />
+                            <small class="text-muted">
+                                הסיסמה חייבת להכיל לפחות 8 תווים, אות גדולה, אות קטנה, מספר ותו מיוחד
+                            </small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">שם מלא:</label>
+                            <InputText @bind-Value="registrationModel.FullName" class="form-control" />
+                            <ValidationMessage For="@(() => registrationModel.FullName)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">דוא"ל:</label>
+                            <InputText @bind-Value="registrationModel.Email" class="form-control" />
+                            <ValidationMessage For="@(() => registrationModel.Email)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">טלפון:</label>
+                            <InputText @bind-Value="registrationModel.PhoneNumber" class="form-control" />
+                            <ValidationMessage For="@(() => registrationModel.PhoneNumber)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">סוג משתמש:</label>
+                            <InputSelect @bind-Value="registrationModel.UserRole" class="form-select">
+                                <option value="0">בעל כלב</option>
+                                <option value="2">מספרת כלבים</option>
+                                <option value="3">וטרינר</option>
+                            </InputSelect>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">עיר:</label>
+                            <InputSelect @bind-Value="selectedCity" @bind-Value:after="OnCityOrStreetChanged" class="form-select">
+                                <option value="">בחר עיר</option>
+                                @foreach (var city in cities)
+                                {
+                                    <option value="@city">@city</option>
+                                }
+                            </InputSelect>
+                            @if (string.IsNullOrEmpty(selectedCity) && showValidationErrors)
+                            {
+                                <div class="text-danger">יש לבחור עיר</div>
+                            }
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">רחוב ומספר בית:</label>
+                            <InputText @bind-Value="streetAddress" @bind-Value:after="OnCityOrStreetChanged" class="form-control" />
+                            @if (string.IsNullOrEmpty(streetAddress) && showValidationErrors)
+                            {
+                                <div class="text-danger">יש להזין רחוב ומספר בית</div>
+                            }
+                        </div>
+
+                        @if (registrationModel.UserRole == 0) // Dog Owner
+                        {
+                            <div class="card mt-4 mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">פרטי כלבים</h5>
+                                    @if (registrationModel.Pets.Count < 10)
+                                    {
+                                        <button type="button" class="btn btn-primary btn-sm" @onclick="AddPet">
+                                            <i class="bi bi-plus-lg"></i> הוסף כלב
+                                        </button>
+                                    }
+                                </div>
+                                <div class="card-body">
+                                    @foreach (var pet in registrationModel.Pets)
+                                    {
+                                        <div class="pet-form mb-4 p-3 border rounded">
+                                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                                <h6 class="mb-0">כלב מספר @(registrationModel.Pets.IndexOf(pet) + 1)</h6>
+                                                <button type="button" class="btn btn-danger btn-sm" @onclick="() => RemovePet(pet)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">שם הכלב:</label>
+                                                <InputText @bind-Value="pet.PetName" class="form-control" />
+                                                <ValidationMessage For="@(() => pet.PetName)" />
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">גזע:</label>
+                                                <InputText @bind-Value="pet.Breed" class="form-control" />
+                                                <ValidationMessage For="@(() => pet.Breed)" />
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">משקל (ק"ג):</label>
+                                                <InputNumber @bind-Value="pet.Weight" class="form-control" />
+                                                <ValidationMessage For="@(() => pet.Weight)" />
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">אלרגיות:</label>
+                                                <InputTextArea @bind-Value="pet.Allergies" class="form-control" />
+                                                <ValidationMessage For="@(() => pet.Allergies)" />
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label">צרכים מיוחדים:</label>
+                                                <InputTextArea @bind-Value="pet.SpecialNeeds" class="form-control" />
+                                                <ValidationMessage For="@(() => pet.SpecialNeeds)" />
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary">הרשמה</button>
+                            <a href="/login" class="btn btn-secondary ms-2">חזרה להתחברות</a>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private RegistrationModel registrationModel = new();
+    private string selectedCity = "";
+    private string streetAddress = "";
+    private bool showValidationErrors = false;
+    private List<string> cities = new()
+    { 
+        "אילת",
+        "אריאל",
+        "אשדוד",
+        "אשקלון",
+        "באר שבע",
+        "בית שאן",
+        "בית שמש",
+        "בני ברק",
+        "בת ים",
+        "גבעתיים",
+        "דימונה",
+        "הוד השרון",
+        "הרצליה",
+        "חדרה",
+        "חולון",
+        "חיפה",
+        "טבריה",
+        "טירת כרמל",
+        "יבנה",
+        "יהוד-מונוסון",
+        "ירושלים",
+        "כפר סבא",
+        "כרמיאל",
+        "לוד",
+        "מודיעין",
+        "נהריה",
+        "נס ציונה",
+        "נתיבות",
+        "נתניה",
+        "עכו",
+        "עפולה",
+        "פתח תקווה",
+        "צפת",
+        "קריית אונו",
+        "קריית אתא",
+        "קריית ביאליק",
+        "קריית גת",
+        "קריית ים",
+        "קריית מוצקין",
+        "קריית מלאכי",
+        "קריית שמונה",
+        "ראש העין",
+        "ראשון לציון",
+        "רחובות",
+        "רמלה",
+        "רמת גן",
+        "רמת השרון",
+        "רעננה",
+        "שדרות",
+        "תל אביב-יפו"
+    };
+
+    private void AddPet()
+    {
+        if (registrationModel.Pets.Count < 10)
+        {
+            registrationModel.Pets.Add(new PetModel());
+        }
+    }
+
+    private void RemovePet(PetModel pet)
+    {
+        registrationModel.Pets.Remove(pet);
+    }
+
+    private void OnCityOrStreetChanged()
+    {
+        if (!string.IsNullOrEmpty(selectedCity) && !string.IsNullOrEmpty(streetAddress))
+        {
+            registrationModel.Address = $"{streetAddress}, {selectedCity}";
+        }
+    }
+
+    private async Task HandleRegistration()
+    {
+        // Set the address before validation
+        if (!string.IsNullOrEmpty(selectedCity) && !string.IsNullOrEmpty(streetAddress))
+        {
+            registrationModel.Address = $"{streetAddress}, {selectedCity}";
+        }
+
+        showValidationErrors = true;
+
+        if (string.IsNullOrEmpty(selectedCity) || string.IsNullOrEmpty(streetAddress))
+        {
+            return;
+        }
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync("api/user/register", registrationModel);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"Response content: {responseContent}"); // Debug line
+
+                var result = await response.Content.ReadFromJsonAsync<RegisterResponse>();
+                if (result != null)
+                {
+                    await ProtectedSessionStorage.SetAsync("userId", result.UserId);
+                    NavigationManager.NavigateTo("/welcome", true);
+                }
+            }
+            else
+            {
+                var errorMessage = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", errorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בהרשמה: {ex.Message}");
+        }
+    }
+
+    private class RegisterResponse
+    {
+        public string UserId { get; set; } = "";
+    }
+} 

@@ -1,0 +1,641 @@
+@page "/appointments"
+@using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage
+@using DogWalkerBlazor.Utilities
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject ProtectedSessionStorage ProtectedSessionStorage
+@rendermode InteractiveServer
+
+<div class="container mt-4" dir="rtl">
+    @if (userId == null)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">טוען...</span>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>פגישות</h2>
+                    @if (userRole >= 1 && userRole <= 3)
+                    {
+                        <button class="btn btn-primary" @onclick="ShowAddAppointmentModal">
+                            <i class="bi bi-plus-lg"></i> הוסף פגישה
+                        </button>
+                    }
+                </div>
+
+                <!-- Filters -->
+                <div class="row mb-4">
+                    @if (userRole == 0) // Dog Owner
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label">סוג שירות:</label>
+                            <select class="form-select" @onchange="@(e => OnServiceTypeFilterChanged(e.Value?.ToString()))">
+                                <option value="">הכל</option>
+                                <option value="walker">מטפל כלבים</option>
+                                <option value="groomer">מספרת כלבים</option>
+                                <option value="vet">וטרינר</option>
+                            </select>
+                        </div>
+                    }
+                    <div class="col-md-4">
+                        <label class="form-label">סטטוס:</label>
+                        <select class="form-select" @onchange="@(e => OnStatusFilterChanged(e.Value?.ToString()))">
+                            <option value="">הכל</option>
+                            <option value="pending">ממתין</option>
+                            <option value="finished">הסתיים</option>
+                            <option value="cancelled">בוטל</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Appointments List -->
+                <div class="row">
+                    @foreach (var appointment in appointments)
+                    {
+                        <div class="col-md-6 mb-3">
+                            <div class="card">
+                                <div class="card-body">
+                                    @if (userRole == 4) // Admin
+                                    {
+                                        <div class="admin-info mb-3">
+                                            <div><strong>מזהה פגישה:</strong> @appointment.AppointmentId</div>
+                                            <div><strong>מזהה כלב:</strong> @appointment.PetId</div>
+                                            <div><strong>מזהה ספק:</strong> @appointment.ProviderId</div>
+                                        </div>
+                                    }
+
+                                    <div class="appointment-info">
+                                        @if (userRole == 0) // Dog Owner
+                                        {
+                                            <div><strong>ספק שירות:</strong> @appointment.ProviderFullName</div>
+                                            <button class="btn btn-outline-primary btn-sm mt-2 mb-2" @onclick="() => ViewProviderProfile(appointment.ProviderId)">
+                                                <i class="bi bi-person"></i> צפה בפרופיל הספק
+                                            </button>
+                                        }
+                                        else if (userRole >= 1 && userRole <= 3) // Service Provider
+                                        {
+                                            <div><strong>בעל הכלב:</strong> @appointment.OwnerFullName</div>
+                                            <button class="btn btn-outline-primary btn-sm mt-2 mb-2" @onclick="() => ViewOwnerProfile(appointment.PetId)">
+                                                <i class="bi bi-person"></i> צפה בפרופיל הבעלים
+                                            </button>
+                                        }
+                                        else // Admin
+                                        {
+                                            <div><strong>ספק שירות:</strong> @appointment.ProviderFullName</div>
+                                            <button class="btn btn-outline-primary btn-sm mt-2 mb-2" @onclick="() => ViewProviderProfile(appointment.ProviderId)">
+                                                <i class="bi bi-person"></i> צפה בפרופיל הספק
+                                            </button>
+                                            <div><strong>בעל הכלב:</strong> @appointment.OwnerFullName</div>
+                                            <button class="btn btn-outline-primary btn-sm mt-2 mb-2" @onclick="() => ViewOwnerProfile(appointment.PetId)">
+                                                <i class="bi bi-person"></i> צפה בפרופיל הבעלים
+                                            </button>
+                                        }
+
+                                        <div><i class="bi bi-calendar"></i> @appointment.AppointmentDate.ToString("dd/MM/yyyy")</div>
+                                        <div><i class="bi bi-clock"></i> @appointment.StartTime.ToString(@"hh\:mm") - @appointment.EndTime.ToString(@"hh\:mm")</div>
+                                        <div><i class="bi bi-tag"></i> @GetServiceTypeText(appointment.ServiceType)</div>
+                                        <div><i class="bi bi-heart"></i> @appointment.PetName</div>
+                                        <div><i class="bi bi-check-circle"></i> <span class="badge @GetStatusBadgeClass(appointment.Status)">@GetStatusText(appointment.Status)</span></div>
+                                    </div>
+
+                                    @if ((userRole >= 1 && userRole <= 3) && appointment.Status == "pending")
+                                    {
+                                        <div class="mt-3">
+                                            <button class="btn btn-success btn-sm me-2" @onclick="@(() => UpdateStatus(appointment.AppointmentId, "finished"))">
+                                                <i class="bi bi-check-lg"></i> סיים
+                                            </button>
+                                            <button class="btn btn-danger btn-sm" @onclick="@(() => UpdateStatus(appointment.AppointmentId, "cancelled"))">
+                                                <i class="bi bi-x-lg"></i> בטל
+                                            </button>
+                                        </div>
+                                    }
+                                    @if ((appointment.Status == "finished" || appointment.Status == "cancelled") && !HasReview(appointment.AppointmentId))
+                                    {
+                                        <div class="mt-3">
+                                            <button class="btn btn-primary btn-sm" @onclick="() => ShowReviewModal(appointment)">
+                                                <i class="bi bi-star"></i> כתוב ביקורת
+                                            </button>
+                                        </div>
+                                    }
+                                    @if (userRole == 4)
+                                    {
+                                        <div class="mt-3">
+                                            <button class="btn btn-danger btn-sm" @onclick="() => DeleteAppointment(appointment.AppointmentId)">
+                                                <i class="bi bi-trash"></i> מחק
+                                            </button>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (showAddModal)
+{
+    <div class="modal fade show" style="display: block;" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">הוסף פגישה חדשה</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAddModal"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="@newAppointment" OnValidSubmit="CreateAppointment">
+                        <DataAnnotationsValidator />
+
+                        <div class="mb-3">
+                            <label class="form-label">מזהה כלב:</label>
+                            <InputNumber @bind-Value="newAppointment.PetId" class="form-control" />
+                            <ValidationMessage For="@(() => newAppointment.PetId)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">תאריך:</label>
+                            <InputDate @bind-Value="newAppointment.AppointmentDate" class="form-control" />
+                            <ValidationMessage For="@(() => newAppointment.AppointmentDate)" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">שעת התחלה:</label>
+                            <input type="time" value="@startTimeString" @onchange="@(e => OnStartTimeChange(e.Value?.ToString()))" class="form-control" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">שעת סיום:</label>
+                            <input type="time" value="@endTimeString" @onchange="@(e => OnEndTimeChange(e.Value?.ToString()))" class="form-control" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">שמור</button>
+                        <button type="button" class="btn btn-secondary" @onclick="CloseAddModal">ביטול</button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@if (showReviewModal)
+{
+    <div class="modal fade show" style="display: block;" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">כתוב ביקורת</h5>
+                    <button type="button" class="btn-close" @onclick="CloseReviewModal"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="@newReview" OnValidSubmit="CreateReview">
+                        <DataAnnotationsValidator />
+
+                        <div class="mb-3">
+                            <label class="form-label">דירוג:</label>
+                            <div class="rating-input">
+                                @for (int i = 1; i <= 5; i++)
+                                {
+                                    var rating = i;
+                                    <i class="bi @(rating <= newReview.Rating ? "bi-star-fill" : "bi-star") text-warning"
+                                       style="cursor: pointer; font-size: 1.5rem;"
+                                       @onclick="() => SetRating(rating)"></i>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">טקסט הביקורת:</label>
+                            <InputTextArea @bind-Value="newReview.ReviewText" class="form-control" rows="4" />
+                            <ValidationMessage For="@(() => newReview.ReviewText)" />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">פרסם ביקורת</button>
+                        <button type="button" class="btn btn-secondary" @onclick="CloseReviewModal">ביטול</button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private string? userId;
+    private int userRole;
+    private List<AppointmentResponse> appointments = new();
+    private bool showAddModal = false;
+    private CreateAppointmentRequest newAppointment = new();
+    private string startTimeString = "00:00";
+    private string endTimeString = "00:00";
+    private string? selectedStatus;
+    private string? selectedServiceType;
+    private bool isLoaded = false;
+    private bool showReviewModal = false;
+    private CreateReviewRequest newReview = new();
+    private AppointmentResponse? selectedAppointment;
+    private HashSet<int> reviewedAppointments = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isLoaded)
+        {
+            isLoaded = true;
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var userIdResult = await ProtectedSessionStorage.GetAsync<string>("userId");
+                if (userIdResult.Success && !string.IsNullOrEmpty(userIdResult.Value))
+                {
+                    userId = userIdResult.Value;
+                    var roleResponse = await client.GetAsync($"api/user/role/{userId}");
+                    if (roleResponse.IsSuccessStatusCode)
+                    {
+                        userRole = await roleResponse.Content.ReadFromJsonAsync<int>();
+                        StateHasChanged();
+                    }
+                }
+                else
+                {
+                    NavigationManager.NavigateTo("/login");
+                    return;
+                }
+
+                await LoadAppointments();
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הפגישות: {ex.Message}");
+                NavigationManager.NavigateTo("/");
+            }
+        }
+    }
+
+    private async Task LoadAppointments()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            string endpoint;
+            
+            if (userRole == 4) // Admin
+            {
+                endpoint = "api/appointment/all";
+                var queryParams = new List<string>();
+                
+                if (!string.IsNullOrEmpty(selectedStatus) && selectedStatus != "")
+                {
+                    queryParams.Add($"status={selectedStatus}");
+                }
+                if (!string.IsNullOrEmpty(selectedServiceType) && selectedServiceType != "")
+                {
+                    queryParams.Add($"serviceType={selectedServiceType}");
+                }
+                
+                if (queryParams.Any())
+                {
+                    endpoint += "?" + string.Join("&", queryParams);
+                }
+            }
+            else // Regular user
+            {
+                endpoint = userRole == 0 
+                    ? $"api/appointment/owner/{userId}" 
+                    : $"api/appointment/provider/{userId}";
+
+                var queryParams = new List<string>();
+                if (!string.IsNullOrEmpty(selectedStatus) && selectedStatus != "")
+                {
+                    queryParams.Add($"status={selectedStatus}");
+                }
+                if (userRole == 0 && !string.IsNullOrEmpty(selectedServiceType) && selectedServiceType != "")
+                {
+                    queryParams.Add($"serviceType={selectedServiceType}");
+                }
+                
+                if (queryParams.Any())
+                {
+                    endpoint += "?" + string.Join("&", queryParams);
+                }
+            }
+
+            var response = await client.GetAsync(endpoint);
+            if (response.IsSuccessStatusCode)
+            {
+                appointments = await response.Content.ReadFromJsonAsync<List<AppointmentResponse>>() ?? new();
+                StateHasChanged();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הפגישות: {ex.Message}");
+        }
+    }
+
+    private void ShowAddAppointmentModal()
+    {
+        newAppointment = new CreateAppointmentRequest
+        {
+            ProviderId = int.Parse(userId!),
+            AppointmentDate = DateTime.Today,
+            ServiceType = userRole switch
+            {
+                1 => "walker",
+                2 => "groomer",
+                3 => "vet",
+                _ => ""
+            }
+        };
+        startTimeString = "00:00";
+        endTimeString = "00:00";
+        showAddModal = true;
+    }
+
+    private void CloseAddModal()
+    {
+        showAddModal = false;
+    }
+
+    private async Task CreateAppointment()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync("api/appointment", newAppointment);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                showAddModal = false;
+                await LoadAppointments();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה ביצירת הפגישה: {ex.Message}");
+        }
+    }
+
+    private async Task UpdateStatus(int appointmentId, string newStatus)
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var request = new { Status = newStatus };
+            var response = await client.PutAsJsonAsync($"api/appointment/status/{appointmentId}", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadAppointments();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בעדכון סטטוס הפגישה: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteAppointment(int appointmentId)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך למחוק פגישה זו?");
+        if (confirmed)
+        {
+            try
+            {
+                var client = HttpClientFactory.CreateClient("API");
+                var response = await client.DeleteAsync($"api/appointment/{appointmentId}");
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    await LoadAppointments();
+                }
+                else
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    await JSRuntime.InvokeVoidAsync("alert", error);
+                }
+            }
+            catch (Exception ex)
+            {
+                await JSRuntime.InvokeVoidAsync("alert", $"שגיאה במחיקת הפגישה: {ex.Message}");
+            }
+        }
+    }
+
+    private void OnStartTimeChange(string? value)
+    {
+        startTimeString = value ?? "00:00";
+        if (TimeSpan.TryParse(startTimeString, out var time))
+        {
+            newAppointment.StartTime = time;
+        }
+    }
+
+    private void OnEndTimeChange(string? value)
+    {
+        endTimeString = value ?? "00:00";
+        if (TimeSpan.TryParse(endTimeString, out var time))
+        {
+            newAppointment.EndTime = time;
+        }
+    }
+
+    private async Task OnStatusFilterChanged(string? status)
+    {
+        selectedStatus = status;
+        await LoadAppointments();
+    }
+
+    private async Task OnServiceTypeFilterChanged(string? serviceType)
+    {
+        selectedServiceType = serviceType;
+        await LoadAppointments();
+    }
+
+    private string GetStatusBadgeClass(string status) => status.ToLower() switch
+    {
+        "pending" => "bg-warning",
+        "finished" => "bg-success",
+        "cancelled" => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private string GetStatusText(string status) => status.ToLower() switch
+    {
+        "pending" => "ממתין",
+        "finished" => "הסתיים",
+        "cancelled" => "בוטל",
+        _ => status
+    };
+
+    private string GetServiceTypeText(string type) => type.ToLower() switch
+    {
+        "walker" => "מטפל כלבים",
+        "groomer" => "מספרת כלבים",
+        "vet" => "וטרינר",
+        _ => type
+    };
+
+    private string GetServiceType(int userRole) => GlobalConstants.UserRoles[userRole];
+
+    private class AppointmentResponse
+    {
+        public int AppointmentId { get; set; }
+        public int PetId { get; set; }
+        public string PetName { get; set; } = "";
+        public int ProviderId { get; set; }
+        public int OwnerId { get; set; }
+        public string? ProviderName { get; set; }
+        public string? ProviderFullName { get; set; }
+        public string? OwnerName { get; set; }
+        public string? OwnerFullName { get; set; }
+        public string ServiceType { get; set; } = "";
+        public DateTime AppointmentDate { get; set; }
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; }
+        public string Status { get; set; } = "";
+    }
+
+    private class CreateAppointmentRequest
+    {
+        public int PetId { get; set; }
+        public int ProviderId { get; set; }
+        public string ServiceType { get; set; } = "";
+        public DateTime AppointmentDate { get; set; }
+        public TimeSpan StartTime { get; set; }
+        public TimeSpan EndTime { get; set; }
+    }
+
+    private void ViewProviderProfile(int providerId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{providerId}");
+    }
+
+    private void ViewOwnerProfile(int ownerId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{ownerId}");
+    }
+
+    private void ViewProfile(int userId)
+    {
+        NavigationManager.NavigateTo($"/view-profile/{userId}");
+    }
+
+    private async Task LoadReviewedAppointments()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.GetAsync($"api/review/reviewer/{userId}");
+            if (response.IsSuccessStatusCode)
+            {
+                var reviews = await response.Content.ReadFromJsonAsync<List<ReviewInfo>>();
+                reviewedAppointments = new HashSet<int>(reviews?.Select(r => r.AppointmentId) ?? Array.Empty<int>());
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בטעינת הביקורות: {ex.Message}");
+        }
+    }
+
+    private bool HasReview(int appointmentId)
+    {
+        return reviewedAppointments.Contains(appointmentId);
+    }
+
+    private void ShowReviewModal(AppointmentResponse appointment)
+    {
+        selectedAppointment = appointment;
+        newReview = new CreateReviewRequest
+        {
+            AppointmentId = appointment.AppointmentId,
+            ReviewerId = int.Parse(userId!),
+            Rating = 0,
+            ReviewText = ""
+        };
+        showReviewModal = true;
+    }
+
+    private void CloseReviewModal()
+    {
+        showReviewModal = false;
+        selectedAppointment = null;
+        newReview = new();
+    }
+
+    private void SetRating(int rating)
+    {
+        newReview.Rating = rating;
+    }
+
+    private async Task CreateReview()
+    {
+        if (newReview.Rating == 0)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "אנא בחר דירוג");
+            return;
+        }
+
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "האם אתה בטוח שברצונך לפרסם ביקורת זו?");
+        if (!confirmed) return;
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var response = await client.PostAsJsonAsync("api/review", newReview);
+
+            if (response.IsSuccessStatusCode)
+            {
+                await LoadReviewedAppointments();
+                CloseReviewModal();
+                await JSRuntime.InvokeVoidAsync("alert", "הביקורת פורסמה בהצלחה");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                await JSRuntime.InvokeVoidAsync("alert", error);
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", $"שגיאה בפרסום הביקורת: {ex.Message}");
+        }
+    }
+
+    private class CreateReviewRequest
+    {
+        public int AppointmentId { get; set; }
+        public int ReviewerId { get; set; }
+        public int Rating { get; set; }
+        public string ReviewText { get; set; } = "";
+    }
+
+    private class ReviewInfo
+    {
+        public int AppointmentId { get; set; }
+    }
+} 
